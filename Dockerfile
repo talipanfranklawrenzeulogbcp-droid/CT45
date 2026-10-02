@@ -55,6 +55,10 @@ RUN { \
     } > /usr/local/etc/php/conf.d/app-production.ini
 
 WORKDIR /var/www/html
+
+# Explicit runtime metadata for hosting platforms that inspect Dockerfiles.
+ENV PORT=80
+ENV HOST=0.0.0.0
 COPY . .
 
 RUN mkdir -p storage/logs storage/exports storage/reports \
@@ -62,9 +66,9 @@ RUN mkdir -p storage/logs storage/exports storage/reports \
     && chmod -R 0755 storage \
     && rm -f .env
 
-EXPOSE 80
+EXPOSE 80/tcp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD php -r '$c=@file_get_contents("http://127.0.0.1/health.php"); exit($c===false ? 1 : 0);'
+    CMD php -r '$c=@file_get_contents("http://127.0.0.1/health/"); exit($c===false ? 1 : 0);'
 
 CMD ["apache2-foreground"]
