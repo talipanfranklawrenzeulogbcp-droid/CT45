@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS admin_notifications (
  INDEX(user_id), INDEX(type), INDEX(is_read), INDEX(created_at),
  CONSTRAINT fk_notification_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
+ALTER TABLE admin_notifications ADD COLUMN IF NOT EXISTS sender_user_id INT UNSIGNED NULL AFTER sender_role;
+ALTER TABLE admin_notifications ADD INDEX IF NOT EXISTS idx_notification_sender_user (sender_user_id);
 CREATE TABLE IF NOT EXISTS archive_items (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  item_type VARCHAR(40) NOT NULL,
@@ -150,7 +152,8 @@ CREATE TABLE IF NOT EXISTS assets (
  location VARCHAR(180),
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
--- Existing installations are migrated safely by includes/db.php; fresh installs define quantity above.
+-- Migration for existing installations created before quantity was added.
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS quantity INT UNSIGNED NOT NULL DEFAULT 1 AFTER serial_number;
 CREATE TABLE IF NOT EXISTS asset_issuances (
  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  asset_id INT UNSIGNED NOT NULL,
@@ -179,11 +182,11 @@ UPDATE users SET role='Staff' WHERE role NOT IN ('Administrator','Staff');
 
 INSERT INTO users(name,email,password_hash,role,active) VALUES
 ('Admin','adminct4@gmail.com','$2y$12$W3CxFvVU6NqcmG5VEempMeY4/gfboeUJdjQgxrzfLtgNCiFpDShQu','Administrator',1)
-ON DUPLICATE KEY UPDATE name=VALUES(name), password_hash=VALUES(password_hash), role='Administrator', active=1;
+ON DUPLICATE KEY UPDATE role='Administrator', active=1;
 
 INSERT INTO users(name,email,password_hash,role,active) VALUES
 ('Staff','ct4staff@gmail.com','$2y$12$W3CxFvVU6NqcmG5VEempMeY4/gfboeUJdjQgxrzfLtgNCiFpDShQu','Staff',1)
-ON DUPLICATE KEY UPDATE name=VALUES(name), password_hash=VALUES(password_hash), role='Staff', active=1;
+ON DUPLICATE KEY UPDATE role='Staff', active=1;
 
 INSERT INTO safety_incidents(title,employee_name,incident_date,severity,status,description)
 SELECT * FROM (

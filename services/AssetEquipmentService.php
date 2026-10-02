@@ -46,7 +46,12 @@ final class AssetEquipmentService {
                 $assetId=(int)$row['asset_id'];
                 $active=$this->pdo->prepare("SELECT COUNT(*) FROM asset_issuances WHERE asset_id=? AND status IN ('Issued','Overdue','Not Returned')");
                 $active->execute([$assetId]); $activeCount=(int)$active->fetchColumn();
-                $this->pdo->prepare("UPDATE assets SET status=CASE WHEN status='Retired' THEN 'Retired' WHEN ? > 0 THEN 'Issued' ELSE 'Available' END WHERE id=?")->execute([$activeCount,$assetId]);
+                $this->pdo->prepare("UPDATE assets SET status=CASE
+                    WHEN status='Retired' THEN 'Retired'
+                    WHEN status='Maintenance' THEN 'Maintenance'
+                    WHEN ? > 0 THEN 'Issued'
+                    ELSE 'Available'
+                END WHERE id=?")->execute([$activeCount,$assetId]);
                 $this->pdo->commit();
             } catch(Throwable $e){ if($this->pdo->inTransaction()) $this->pdo->rollBack(); throw $e; }
             $this->audit->record($user,self::MODULE,'Update Issuance Status','Issuance ID '.$id.' -> '.$status);

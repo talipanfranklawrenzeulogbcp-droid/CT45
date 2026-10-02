@@ -23,7 +23,7 @@ page_header('System Administration & Security','security');show_flash();?>
 </section>
 <section class="gw-stats">
 <div class="gw-stat"><span class="gw-stat-label">Active Users</span><div class="gw-stat-value"><?=count(array_filter($users,fn($u)=>(int)$u['active']===1))?></div><div class="gw-stat-meta">Active accounts</div></div>
-<div class="gw-stat"><span class="gw-stat-label">Login History</span><div class="gw-stat-value"><?=count($logins)?></div><div class="gw-stat-meta positive">Latest 30 records</div></div>
+<div class="gw-stat"><span class="gw-stat-label">Login History</span><div class="gw-stat-value"><?=count($logins)?></div><div class="gw-stat-meta positive">Matching login records</div></div>
 
 </section>
 
