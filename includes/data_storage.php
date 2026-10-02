@@ -20,9 +20,19 @@ if($action==='download_all'){
     if($zip->open($tmp,ZipArchive::CREATE|ZipArchive::OVERWRITE)!==true){ http_response_code(500); exit('Unable to create download package.'); }
     $used=[];
     foreach($files as $file){
+        // Never allow uploaded names to create traversal paths when a ZIP is
+        // extracted by a desktop/archive utility.
         $name=(string)$file['file_name'];
+        $name=preg_replace('/[\\\\\/]+/', '_', $name);
+        $name=preg_replace('/[\\x00-\\x1F\\x7F]+/', '_', $name);
+        $name=trim($name, " .");
+        if($name==='') $name='file';
         $base=$name; $i=1;
-        while(isset($used[$name])){ $name=pathinfo($base,PATHINFO_FILENAME).'_'.$i.(pathinfo($base,PATHINFO_EXTENSION)?'.'.pathinfo($base,PATHINFO_EXTENSION):''); $i++; }
+        while(isset($used[$name])){
+            $ext=pathinfo($base,PATHINFO_EXTENSION);
+            $stem=pathinfo($base,PATHINFO_FILENAME);
+            $name=$stem.'_'.$i.($ext!==''?'.'.$ext:''); $i++;
+        }
         $used[$name]=true;
         $zip->addFromString($name,(string)$file['file_data']);
     }
@@ -40,10 +50,15 @@ if($action==='view' || $action==='download'){
     if(!$file){ http_response_code(404); exit('File not found.'); }
     $name=$file['file_name'];
     $safeName=preg_replace('/[\r\n"\'\\\\]+/', '_', (string)$name);
-    header('Content-Type: '.($file['file_type']?:'application/octet-stream'));
+    $mime=(string)($file['file_type']?:'application/octet-stream');
+    $inlineSafe = preg_match('#^(image/(?:png|jpeg|gif|webp|svg\\+xml)|application/pdf|text/plain)$#i', $mime) === 1;
+    header('Content-Type: '.$mime);
     header('Content-Length: '.strlen((string)$file['file_data']));
     header('X-Content-Type-Options: nosniff');
-    header('Content-Disposition: '.($action==='download'?'attachment':'inline').'; filename="'.$safeName.'"');
+    if (!$inlineSafe) {
+        header('Content-Security-Policy: default-src \'none\'; sandbox;');
+    }
+    header('Content-Disposition: '.($action==='download' || !$inlineSafe?'attachment':'inline').'; filename="'.$safeName.'"');
     echo $file['file_data'];
     exit;
 }

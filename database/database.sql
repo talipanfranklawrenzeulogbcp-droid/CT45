@@ -25,8 +25,6 @@ CREATE TABLE IF NOT EXISTS admin_notifications (
  INDEX(user_id), INDEX(type), INDEX(is_read), INDEX(created_at),
  CONSTRAINT fk_notification_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
-ALTER TABLE admin_notifications ADD COLUMN IF NOT EXISTS sender_user_id INT UNSIGNED NULL AFTER sender_role;
-ALTER TABLE admin_notifications ADD INDEX IF NOT EXISTS idx_notification_sender_user (sender_user_id);
 CREATE TABLE IF NOT EXISTS archive_items (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  item_type VARCHAR(40) NOT NULL,
@@ -94,20 +92,6 @@ CREATE TABLE IF NOT EXISTS health_records (
  notes TEXT,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
-CREATE TABLE IF NOT EXISTS health_safety_files (
- id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
- employee_name VARCHAR(120) NOT NULL,
- requester_user_id INT UNSIGNED NULL,
- file_name VARCHAR(180) NOT NULL,
- file_type VARCHAR(120) NULL,
- storage_file_id BIGINT UNSIGNED NULL,
- action_type ENUM('Requested','Released') NOT NULL,
- request_date DATE NOT NULL,
- notes TEXT NULL,
- released_at DATETIME NULL,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- INDEX(employee_name), INDEX(action_type), INDEX(request_date)
-) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS compliance_obligations (
  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  title VARCHAR(180) NOT NULL,
@@ -152,8 +136,7 @@ CREATE TABLE IF NOT EXISTS assets (
  location VARCHAR(180),
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
--- Migration for existing installations created before quantity was added.
-ALTER TABLE assets ADD COLUMN IF NOT EXISTS quantity INT UNSIGNED NOT NULL DEFAULT 1 AFTER serial_number;
+-- Existing installations are migrated safely by includes/db.php; fresh installs define quantity above.
 CREATE TABLE IF NOT EXISTS asset_issuances (
  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  asset_id INT UNSIGNED NOT NULL,

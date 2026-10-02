@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__.'/helpers.php';
+require_once __DIR__.'/service_client.php';
 require_login();
 $action=(string)($_POST['action'] ?? $_GET['action'] ?? 'list');
 
@@ -39,7 +40,6 @@ if($_SERVER['REQUEST_METHOD']==='POST' && $action==='recover'){
                 'compliance_obligations',
                 'compliance_audits',
                 'health_records',
-                'health_safety_files',
                 'assets',
                 'asset_issuances',
                 'issuance_records',

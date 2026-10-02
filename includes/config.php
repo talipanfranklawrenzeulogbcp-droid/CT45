@@ -1,23 +1,4 @@
 <?php
-
-/*
- * Production-safe database configuration.
- * In production, database credentials MUST be supplied through environment
- * variables. Localhost/root/empty-password defaults are intentionally disabled.
- */
-if (!function_exists('env_required')) {
-    function env_required(string $name, ?string $default = null): string {
-        $value = getenv($name);
-        if ($value === false || trim((string)$value) === '') {
-            if ($default !== null && in_array(strtolower((string)getenv('APP_ENV')), ['local','development','dev'], true)) {
-                return $default;
-            }
-            throw new RuntimeException("Missing required environment variable: {$name}");
-        }
-        return (string)$value;
-    }
-}
-
 // =============================================================
 // GREAT SOLOMON MANPOWER SERVICES INC. — CORE TRANSACTION 4
 // config.php — Centralised runtime configuration.

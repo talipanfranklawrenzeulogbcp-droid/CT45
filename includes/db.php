@@ -10,31 +10,53 @@ function db(): PDO {
     if ($pdo instanceof PDO) return $pdo;
 
     $dsn = 'mysql:host='.DB_HOST.';port='.DB_PORT.';dbname='.DB_NAME.';charset=utf8mb4';
-    try {
-        $pdo = new PDO($dsn, DB_USER, DB_PASS, [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
-            PDO::ATTR_TIMEOUT             => 5,
-        ]);
-    } catch (Throwable $e) {
-        error_log('[CT4 DATABASE] Connection failed: '. $e->getMessage());
-        throw new RuntimeException('Database connection is unavailable. Verify the production database environment variables and database service.', 0, $e);
-    }
+    $pdo = new PDO($dsn, DB_USER, DB_PASS, [
+        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES   => false,
+    ]);
 
-    // Lightweight schema migrations — keep existing installations compatible.
-    // All wrapped in try/catch so first-boot or managed-DB permission gaps
-    // do not crash the application (HostForge migration privilege safety rule).
+    // Lightweight, version-compatible schema migrations.
+    // Avoid MySQL/MariaDB-version-specific "ADD COLUMN IF NOT EXISTS" syntax:
+    // managed hosts may run versions where that form is unsupported.
     try {
-        $pdo->exec("ALTER TABLE health_safety_files ADD COLUMN IF NOT EXISTS requester_user_id INT UNSIGNED NULL AFTER employee_name");
-        $pdo->exec("ALTER TABLE health_safety_files ADD COLUMN IF NOT EXISTS storage_file_id BIGINT UNSIGNED NULL AFTER file_type");
-        $pdo->exec("ALTER TABLE health_safety_files ADD COLUMN IF NOT EXISTS released_at DATETIME NULL AFTER notes");
-        $pdo->exec("ALTER TABLE compliance_obligations ADD COLUMN IF NOT EXISTS report_name VARCHAR(120) NULL AFTER title");
-        $pdo->exec("ALTER TABLE compliance_obligations ADD COLUMN IF NOT EXISTS report_role VARCHAR(120) NULL AFTER report_name");
-        $pdo->exec("ALTER TABLE compliance_obligations ADD COLUMN IF NOT EXISTS contact_no VARCHAR(60) NULL AFTER report_role");
-        $pdo->exec("ALTER TABLE compliance_obligations ADD COLUMN IF NOT EXISTS compliance_note TEXT NULL AFTER contact_no");
-        $pdo->exec("ALTER TABLE compliance_obligations ADD COLUMN IF NOT EXISTS reported_at DATETIME NULL AFTER compliance_note");
-    } catch (Throwable $e) { /* Retry on next request — initial schema may not exist yet */ }
+        $addColumn = static function (PDO $pdo, string $table, string $column, string $definition): void {
+            $q = $pdo->prepare(
+                'SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+            );
+            $q->execute([$table, $column]);
+            if ((int)$q->fetchColumn() === 0) {
+                $pdo->exec('ALTER TABLE `'.str_replace('`','',$table).'` ADD COLUMN `'
+                    .str_replace('`','',$column).'` '.$definition);
+            }
+        };
+
+        $addIndex = static function (PDO $pdo, string $table, string $index, string $columns): void {
+            $q = $pdo->prepare(
+                'SELECT COUNT(*) FROM information_schema.STATISTICS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?'
+            );
+            $q->execute([$table, $index]);
+            if ((int)$q->fetchColumn() === 0) {
+                $pdo->exec('ALTER TABLE `'.str_replace('`','',$table).'` ADD INDEX `'
+                    .str_replace('`','',$index).'` ('.$columns.')');
+            }
+        };
+
+        $addColumn($pdo, 'admin_notifications', 'sender_user_id', 'INT UNSIGNED NULL');
+        $addIndex($pdo, 'admin_notifications', 'idx_notification_sender_user', '`sender_user_id`');
+
+        $addColumn($pdo, 'compliance_obligations', 'report_name', 'VARCHAR(120) NULL');
+        $addColumn($pdo, 'compliance_obligations', 'report_role', 'VARCHAR(120) NULL');
+        $addColumn($pdo, 'compliance_obligations', 'contact_no', 'VARCHAR(60) NULL');
+        $addColumn($pdo, 'compliance_obligations', 'compliance_note', 'TEXT NULL');
+        $addColumn($pdo, 'compliance_obligations', 'reported_at', 'DATETIME NULL');
+        $addColumn($pdo, 'assets', 'quantity', 'INT UNSIGNED NOT NULL DEFAULT 1');
+    } catch (Throwable $e) {
+        // Retry on the next request. A first-boot schema may not exist yet,
+        // or the managed database may temporarily restrict ALTER privileges.
+    }
 
     // Legacy roles are normalised to Staff; only Administrator and Staff are supported.
     try {
