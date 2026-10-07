@@ -51,13 +51,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
             db()->prepare('DELETE FROM otp_requests WHERE user_id=?')->execute([(int)$pending['id']]);
             db()->prepare('INSERT INTO otp_requests(user_id,otp_hash,expires_at,attempts) VALUES(?,?,?,0)')
                 ->execute([(int)$pending['id'],$hash,$expires]);
-            try {
-                send_otp_email($pending['email'],$pending['name'],$otp);
-                $success='A new 6-digit verification code has been sent to your email.';
-            } catch(Throwable $mailError) {
-                db()->prepare('DELETE FROM otp_requests WHERE user_id=?')->execute([(int)$pending['id']]);
-                $error='Unable to send verification code. Check the Gmail SMTP/App Password settings and try again.';
-            }
+            send_otp_email($pending['email'],$pending['name'],$otp);
+            $success='A new 6-digit verification code has been sent to your email.';
         } elseif ($action==='login') {
             $email=trim($_POST['email']??'');
             $password=$_POST['password']??'';

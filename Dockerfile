@@ -1,74 +1,36 @@
-FROM php:8.3-apache
+FROM php:8.2-apache
 
-# Install the native libraries and PHP extensions used by the application.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        libcurl4-openssl-dev \
-        libfreetype6-dev \
-        libjpeg62-turbo-dev \
-        libonig-dev \
-        libpng-dev \
-        libzip-dev \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j"$(nproc)" \
-        curl \
-        gd \
-        mbstring \
-        opcache \
-        pdo_mysql \
-        zip \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+ENV APACHE_DOCUMENT_ROOT=/var/www/html
 
-# Allow the application's .htaccess routing and security headers.
-RUN a2enmod headers rewrite \
-    && { \
-        echo '<VirtualHost *:80>'; \
-        echo '    ServerName localhost'; \
-        echo '    ServerAlias *'; \
-        echo '    DocumentRoot /var/www/html'; \
-        echo '    <Directory /var/www/html>'; \
-        echo '        AllowOverride All'; \
-        echo '        Options -Indexes +FollowSymLinks'; \
-        echo '        Require all granted'; \
-        echo '    </Directory>'; \
-        echo '    ErrorLog /dev/stderr'; \
-        echo '    CustomLog /dev/stdout combined'; \
-        echo '</VirtualHost>'; \
-    } > /etc/apache2/sites-available/000-default.conf
-
-# Production-oriented PHP defaults. HostForge supplies secrets at runtime.
-RUN { \
-        echo 'expose_php=Off'; \
-        echo 'display_errors=Off'; \
-        echo 'log_errors=On'; \
-        echo 'error_log=/proc/self/fd/2'; \
-        echo 'memory_limit=256M'; \
-        echo 'upload_max_filesize=64M'; \
-        echo 'post_max_size=64M'; \
-        echo 'session.cookie_httponly=1'; \
-        echo 'session.cookie_samesite=Lax'; \
-        echo 'session.use_strict_mode=1'; \
-        echo 'opcache.enable=1'; \
-        echo 'opcache.validate_timestamps=0'; \
-        echo 'opcache.memory_consumption=128'; \
-    } > /usr/local/etc/php/conf.d/app-production.ini
+RUN docker-php-ext-install pdo_mysql opcache \
+    && a2enmod rewrite headers expires \
+    && printf '%s\n' 'ServerName localhost' > /etc/apache2/conf-available/ct4-servername.conf \
+    && a2enconf ct4-servername
 
 WORKDIR /var/www/html
+COPY . /var/www/html/
 
-# Explicit runtime metadata for hosting platforms that inspect Dockerfiles.
-ENV PORT=80
-ENV HOST=0.0.0.0
-COPY . .
+# Production container must never ship local secrets.
+RUN rm -f /var/www/html/.env \
+    && mkdir -p /var/www/html/storage/logs /var/www/html/storage/exports /var/www/html/storage/reports \
+    && chown -R www-data:www-data /var/www/html/storage \
+    && chmod -R 775 /var/www/html/storage
 
-RUN mkdir -p storage/logs storage/exports storage/reports \
-    && chown -R www-data:www-data storage \
-    && chmod -R 0755 storage \
-    && rm -f .env
+# PHP upload/runtime settings for asset pictures and normal requests.
+RUN { \
+      echo 'upload_max_filesize=8M'; \
+      echo 'post_max_size=10M'; \
+      echo 'max_execution_time=60'; \
+      echo 'memory_limit=256M'; \
+      echo 'expose_php=Off'; \
+      echo 'opcache.enable=1'; \
+      echo 'opcache.enable_cli=0'; \
+      echo 'opcache.validate_timestamps=0'; \
+      echo 'opcache.memory_consumption=128'; \
+      echo 'opcache.max_accelerated_files=10000'; \
+    } > /usr/local/etc/php/conf.d/ct4-production.ini
 
-EXPOSE 80/tcp
+EXPOSE 80
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD php -r '$c=@file_get_contents("http://127.0.0.1/health/"); exit($c===false ? 1 : 0);'
-
-CMD ["apache2-foreground"]
+HEALTHCHECK --interval=20s --timeout=3s --start-period=5s --retries=3 \
+  CMD php -r '$s=@file_get_contents("http://127.0.0.1/health.php"); exit($s === "CT4_OK" ? 0 : 1);'

@@ -1,8 +1,25 @@
-<?php
-// Load runtime/session configuration before starting the session so secure,
-// HttpOnly and SameSite cookie attributes are actually applied on first request.
 require_once __DIR__.'/config.php';
+<?php
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+
+
+function csrf_token(): string {
+    if (empty($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+function csrf_field(): string {
+    return '<input type="hidden" name="csrf_token" value="'.htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8').'">';
+}
+function verify_csrf(?string $token = null): void {
+    $token = $token ?? (string)($_POST['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ''));
+    $stored = (string)($_SESSION['csrf_token'] ?? '');
+    if ($stored === '' || $token === '' || !hash_equals($stored, $token)) {
+        http_response_code(419);
+        throw new RuntimeException('Your security token expired. Refresh the page and try again.');
+    }
+}
 
 function current_user(): ?array { return $_SESSION['user'] ?? null; }
 
@@ -10,9 +27,7 @@ function app_base_path(): string {
     $path=str_replace('\\','/',dirname($_SERVER['SCRIPT_NAME']??'/'));
     if(str_contains($path,'/modules/')) return preg_replace('#/modules/.*$#','',$path) ?: '';
     if(str_contains($path,'/auth/')) return preg_replace('#/auth/.*$#','',$path) ?: '';
-    if(str_contains($path,'/includes')) return preg_replace('#/includes.*$#','',$path) ?: '';
-    if(str_contains($path,'/services')) return preg_replace('#/services.*$#','',$path) ?: '';
-    return ($path==='/' || $path==='.') ? '' : rtrim($path,'/');
+    return $path==='/'?'':rtrim($path,'/');
 }
 
 function require_login(): void {
