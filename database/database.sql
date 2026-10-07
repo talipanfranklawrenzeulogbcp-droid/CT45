@@ -1,6 +1,5 @@
--- Optional for local setup only (uncomment if creating a local database from scratch):
--- CREATE DATABASE IF NOT EXISTS great_solomon_ct4 CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
--- USE great_solomon_ct4;
+CREATE DATABASE IF NOT EXISTS great_solomon_ct4 CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE great_solomon_ct4;
 
 CREATE TABLE IF NOT EXISTS users (
  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -182,51 +181,28 @@ UPDATE users SET role='Staff' WHERE role NOT IN ('Administrator','Staff');
 
 INSERT INTO users(name,email,password_hash,role,active) VALUES
 ('Admin','adminct4@gmail.com','$2y$12$W3CxFvVU6NqcmG5VEempMeY4/gfboeUJdjQgxrzfLtgNCiFpDShQu','Administrator',1)
-ON DUPLICATE KEY UPDATE role='Administrator', active=1;
+ON DUPLICATE KEY UPDATE name=VALUES(name), password_hash=VALUES(password_hash), role='Administrator', active=1;
 
 INSERT INTO users(name,email,password_hash,role,active) VALUES
-('Staff','ct4staff@gmail.com','$2y$12$W3CxFvVU6NqcmG5VEempMeY4/gfboeUJdjQgxrzfLtgNCiFpDShQu','Staff',1)
-ON DUPLICATE KEY UPDATE role='Staff', active=1;
+('Staff','ct4staff@gmail.com','$2y$12$sJodMRrCJDu1/12E9vhwYOPgOtXo8rg.V/t2zUqdFl7dEFwd4zNZq','Staff',1)
+ON DUPLICATE KEY UPDATE name=VALUES(name), password_hash=VALUES(password_hash), role='Staff', active=1;
 
-INSERT INTO safety_incidents(title,employee_name,incident_date,severity,status,description)
-SELECT * FROM (
-    SELECT 'Safety inspection finding','Juan Dela Cruz',CURDATE(),'Medium','Open','Initial sample incident for the database.'
-) AS seed
-WHERE NOT EXISTS (SELECT 1 FROM safety_incidents WHERE title='Safety inspection finding' AND employee_name='Juan Dela Cruz' AND description='Initial sample incident for the database.')
-UNION ALL
-SELECT * FROM (
-    SELECT 'Minor workplace injury','Maria Santos',DATE_SUB(CURDATE(),INTERVAL 2 DAY),'Low','Closed','Sample closed incident.'
-) AS seed
-WHERE NOT EXISTS (SELECT 1 FROM safety_incidents WHERE title='Minor workplace injury' AND employee_name='Maria Santos' AND description='Sample closed incident.');
-INSERT INTO health_records(employee_name,checkup_date,record_type,fitness_status,notes)
-SELECT 'Juan Dela Cruz',CURDATE(),'Annual Checkup','Fit','Sample health record.'
-WHERE NOT EXISTS (SELECT 1 FROM health_records WHERE employee_name='Juan Dela Cruz' AND record_type='Annual Checkup' AND notes='Sample health record.');
-INSERT INTO compliance_obligations(title,category,owner,due_date,priority,status)
-SELECT * FROM (
-    SELECT 'Annual workplace compliance review','Regulatory','Compliance Officer',DATE_ADD(CURDATE(),INTERVAL 30 DAY),'High','Open'
-) AS seed
-WHERE NOT EXISTS (SELECT 1 FROM compliance_obligations WHERE title='Annual workplace compliance review')
-UNION ALL
-SELECT * FROM (
-    SELECT 'Permit renewal','Permit','Administration',DATE_ADD(CURDATE(),INTERVAL 10 DAY),'Medium','In Progress'
-) AS seed
-WHERE NOT EXISTS (SELECT 1 FROM compliance_obligations WHERE title='Permit renewal');
-INSERT INTO compliance_audits(title,audit_date,auditor,status,findings)
-SELECT 'Annual compliance audit',DATE_ADD(CURDATE(),INTERVAL 7 DAY),'Internal Audit','Scheduled','Sample audit schedule.'
-WHERE NOT EXISTS (SELECT 1 FROM compliance_audits WHERE title='Annual compliance audit' AND findings='Sample audit schedule.');
+INSERT INTO safety_incidents(title,employee_name,incident_date,severity,status,description) VALUES
+('Safety inspection finding','Juan Dela Cruz',CURDATE(),'Medium','Open','Initial sample incident for the database.'),
+('Minor workplace injury','Maria Santos',DATE_SUB(CURDATE(),INTERVAL 2 DAY),'Low','Closed','Sample closed incident.');
+INSERT INTO health_records(employee_name,checkup_date,record_type,fitness_status,notes) VALUES
+('Juan Dela Cruz',CURDATE(),'Annual Checkup','Fit','Sample health record.');
+INSERT INTO compliance_obligations(title,category,owner,due_date,priority,status) VALUES
+('Annual workplace compliance review','Regulatory','Compliance Officer',DATE_ADD(CURDATE(),INTERVAL 30 DAY),'High','Open'),
+('Permit renewal','Permit','Administration',DATE_ADD(CURDATE(),INTERVAL 10 DAY),'Medium','In Progress');
+INSERT INTO compliance_audits(title,audit_date,auditor,status,findings) VALUES
+('Annual compliance audit',DATE_ADD(CURDATE(),INTERVAL 7 DAY),'Internal Audit','Scheduled','Sample audit schedule.');
 INSERT INTO assets(asset_tag,name,category,serial_number,status,quantity,location) VALUES
 ('AST-0001','Laptop - Admin','Computer','SN-GSMS-0001','Issued',1,'Head Office'),
 ('AST-0002','Desktop Workstation','Computer','SN-GSMS-0002','Available',1,'Head Office'),
-('AST-0003','Network Printer','Printer','SN-GSMS-0003','Maintenance',1,'IT Room')
-ON DUPLICATE KEY UPDATE name=VALUES(name);
-INSERT INTO asset_issuances(asset_id,employee_name,issued_date,expected_return,status,notes)
-SELECT id,'Admin User',CURDATE(),DATE_ADD(CURDATE(),INTERVAL 365 DAY),'Issued','Sample issuance.'
-FROM assets
-WHERE asset_tag='AST-0001'
-AND NOT EXISTS (
-    SELECT 1 FROM asset_issuances i
-    WHERE i.asset_id=assets.id AND i.employee_name='Admin User' AND i.notes='Sample issuance.'
-);
+('AST-0003','Network Printer','Printer','SN-GSMS-0003','Maintenance',1,'IT Room');
+INSERT INTO asset_issuances(asset_id,employee_name,issued_date,expected_return,status,notes) VALUES
+(1,'Admin User',CURDATE(),DATE_ADD(CURDATE(),INTERVAL 365 DAY),'Issued','Sample issuance.');
 UPDATE assets SET status='Issued' WHERE asset_tag='AST-0001';
 
 -- Additional demo issuance history records
@@ -259,3 +235,125 @@ CREATE TABLE IF NOT EXISTS data_storage (
  INDEX(uploaded_by), INDEX(created_at),
  CONSTRAINT fk_storage_user FOREIGN KEY(uploaded_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
+
+-- MERGED CT44 workflow schema additions; existing CT4 schema/data remain the base.
+
+CREATE TABLE IF NOT EXISTS feedback_threads (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ user_id INT UNSIGNED NULL,
+ subject VARCHAR(180) NOT NULL DEFAULT 'General Feedback',
+ category VARCHAR(60) NOT NULL DEFAULT 'General Feedback',
+ priority VARCHAR(20) NOT NULL DEFAULT 'Medium',
+ status VARCHAR(30) NOT NULL DEFAULT 'New',
+ legacy_notification_id BIGINT UNSIGNED NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+ resolved_at TIMESTAMP NULL DEFAULT NULL,
+ resolved_by INT UNSIGNED NULL,
+ archived_at TIMESTAMP NULL DEFAULT NULL,
+ INDEX idx_feedback_user(user_id), INDEX idx_feedback_status(status), INDEX idx_feedback_updated(updated_at),
+ UNIQUE KEY uq_feedback_legacy(legacy_notification_id),
+ CONSTRAINT fk_feedback_thread_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
+ CONSTRAINT fk_feedback_thread_resolver FOREIGN KEY(resolved_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS feedback_messages (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ thread_id BIGINT UNSIGNED NOT NULL,
+ sender_user_id INT UNSIGNED NULL,
+ sender_name VARCHAR(120) NULL,
+ sender_role VARCHAR(60) NULL,
+ message TEXT NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ INDEX idx_feedback_message_thread(thread_id), INDEX idx_feedback_message_sender(sender_user_id),
+ CONSTRAINT fk_feedback_message_thread FOREIGN KEY(thread_id) REFERENCES feedback_threads(id) ON DELETE CASCADE,
+ CONSTRAINT fk_feedback_message_sender FOREIGN KEY(sender_user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS health_followups (
+ id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ health_record_id INT UNSIGNED NULL,
+ employee_name VARCHAR(120) NOT NULL,
+ followup_type VARCHAR(120) NOT NULL,
+ due_date DATE NOT NULL,
+ status ENUM('Pending','Completed','Cancelled','Overdue') NOT NULL DEFAULT 'Pending',
+ notes TEXT,
+ completed_at DATETIME NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ INDEX(health_record_id), INDEX(due_date), INDEX(status),
+ CONSTRAINT fk_health_followup_record FOREIGN KEY(health_record_id) REFERENCES health_records(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS incident_actions (
+ id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ incident_id INT UNSIGNED NOT NULL,
+ action_type ENUM('Immediate','Corrective','Preventive','Investigation') NOT NULL DEFAULT 'Corrective',
+ action_text TEXT NOT NULL,
+ owner VARCHAR(120) NULL,
+ due_date DATE NULL,
+ status ENUM('Open','In Progress','Completed','Cancelled') NOT NULL DEFAULT 'Open',
+ completed_at DATETIME NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ INDEX(incident_id), INDEX(due_date), INDEX(status),
+ CONSTRAINT fk_incident_action_incident FOREIGN KEY(incident_id) REFERENCES safety_incidents(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS compliance_action_items (
+ id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ compliance_id INT UNSIGNED NOT NULL,
+ action_text TEXT NOT NULL,
+ owner VARCHAR(120) NULL,
+ due_date DATE NULL,
+ status ENUM('Open','In Progress','Completed','Cancelled') NOT NULL DEFAULT 'Open',
+ completion_notes TEXT,
+ completed_at DATETIME NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ INDEX(compliance_id), INDEX(due_date), INDEX(status),
+ CONSTRAINT fk_compliance_action_item FOREIGN KEY(compliance_id) REFERENCES compliance_obligations(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS document_requirements (
+ id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ document_name VARCHAR(180) NOT NULL,
+ category VARCHAR(120) NOT NULL,
+ description TEXT NULL,
+ required_for_recruitment TINYINT(1) NOT NULL DEFAULT 1,
+ requires_expiry TINYINT(1) NOT NULL DEFAULT 0,
+ sort_order INT NOT NULL DEFAULT 0,
+ active TINYINT(1) NOT NULL DEFAULT 1,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE KEY uq_document_requirement_name (document_name),
+ INDEX(category), INDEX(active), INDEX(sort_order)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS employee_documents (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ employee_name VARCHAR(120) NOT NULL,
+ employee_id VARCHAR(60) NULL,
+ requirement_id INT UNSIGNED NULL,
+ document_name VARCHAR(180) NOT NULL,
+ category VARCHAR(120) NOT NULL,
+ document_number VARCHAR(180) NULL,
+ issued_date DATE NULL,
+ expiry_date DATE NULL,
+ status ENUM('Uploaded','Pending Review','Verified','Expired','Rejected') NOT NULL DEFAULT 'Pending Review',
+ notes TEXT NULL,
+ file_name VARCHAR(255) NOT NULL,
+ file_type VARCHAR(180) NOT NULL DEFAULT 'application/octet-stream',
+ file_size BIGINT UNSIGNED NOT NULL DEFAULT 0,
+ file_hash CHAR(64) NULL,
+ file_data LONGBLOB NOT NULL,
+ uploaded_by INT UNSIGNED NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+ INDEX(employee_name), INDEX(employee_id), INDEX(requirement_id), INDEX(category), INDEX(status), INDEX(expiry_date), INDEX(created_at),
+ CONSTRAINT fk_employee_document_requirement FOREIGN KEY(requirement_id) REFERENCES document_requirements(id) ON DELETE SET NULL,
+ CONSTRAINT fk_employee_document_user FOREIGN KEY(uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Asset image columns required by the replacement Asset & Equipment process.
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS image_name VARCHAR(255) NULL;
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS image_type VARCHAR(100) NULL;
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS image_size INT UNSIGNED NOT NULL DEFAULT 0;
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS image_hash CHAR(64) NULL;
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS image_data MEDIUMBLOB NULL;

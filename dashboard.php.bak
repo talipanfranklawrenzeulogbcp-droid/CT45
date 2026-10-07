@@ -1,0 +1,127 @@
+<?php
+require_once __DIR__.'/includes/helpers.php';
+require_once __DIR__.'/includes/service_client.php';
+require_login();
+$data=service('reports')->dashboard();
+$counts=$data['counts'];
+$healthChart=$data['health_chart'];
+$assetIssuanceChart=$data['asset_issuance_chart'];
+require_once __DIR__.'/includes/config.php';
+page_header('Reports, Analysis & Dashboard','dashboard'); show_flash(); ?>
+<div class="gw-breadcrumb"><span class="material-symbols-outlined">home</span><span>Great Solomon Manpower Services Inc.</span><span>/</span><strong>Reports, Analysis &amp; Dashboard</strong></div>
+
+<section class="gw-hero dashboard-hero">
+  <div>
+    <div class="eyebrow">CORE TRANSACTION 4</div>
+    <div class="dashboard-title-brand">
+      <div class="brand-logo-white dashboard-logo-wrap"><img src="assets/logo2.svg" alt="Great Solomon Manpower Services Inc. logo" class="brand-logo-image"></div>
+      <h1>Reports, Analysis &amp; Dashboard</h1>
+    </div>
+    <p>Central reports, analysis and dashboard for Core Transaction 4.</p>
+  </div>
+</section>
+
+<section class="gw-quick-actions">
+<a href="modules/health_safety/index.php">Health &amp; Safety</a>
+<a href="modules/legal_compliance/index.php">Legal &amp; Compliance</a>
+<a href="modules/system_admin_security/index.php">Security</a>
+<a href="modules/asset_equipment/index.php">Assets</a>
+</section>
+
+<section class="gw-stats">
+<div class="gw-stat"><div class="gw-stat-top"><span class="gw-stat-label">Safety Incidents</span><div class="gw-stat-icon"><span class="material-symbols-outlined">health_and_safety</span></div></div><div class="gw-stat-value"><?=e($counts['incidents'])?></div><div class="gw-stat-meta warning"><?=e($counts['open_incidents'])?> open / under investigation</div></div>
+<div class="gw-stat"><div class="gw-stat-top"><span class="gw-stat-label">Compliance</span><div class="gw-stat-icon"><span class="material-symbols-outlined">gavel</span></div></div><div class="gw-stat-value"><?=e($counts['obligations'])?></div><div class="gw-stat-meta warning"><?=e($counts['overdue'])?> overdue / attention</div></div>
+<div class="gw-stat"><div class="gw-stat-top"><span class="gw-stat-label">Active Users</span><div class="gw-stat-icon"><span class="material-symbols-outlined">admin_panel_settings</span></div></div><div class="gw-stat-value"><?=e($counts['users'])?></div><div class="gw-stat-meta positive"><?=e($counts['logins'])?> successful logins recorded</div></div>
+<div class="gw-stat"><div class="gw-stat-top"><span class="gw-stat-label">Assets</span><div class="gw-stat-icon"><span class="material-symbols-outlined">inventory_2</span></div></div><div class="gw-stat-value"><?=e($counts['assets'])?></div><div class="gw-stat-meta positive"><?=e($counts['issued'])?> currently issued</div></div>
+</section>
+
+<section class="gw-chart-grid" aria-label="Reports and analytics charts">
+  <article class="gw-panel gw-dashboard-chart-panel">
+    <div class="gw-panel-head"><h2>Health, Safety &amp; Governance</h2><span>Live module tracking</span></div>
+    <div class="gw-chart-wrap gw-chart-wrap-large"><canvas id="healthGovernanceBarChart"></canvas></div>
+  </article>
+  <article class="gw-panel gw-dashboard-chart-panel">
+    <div class="gw-panel-head"><h2>Assets, Equipment &amp; Issuance</h2><span>Issuance History status tracking</span></div>
+    <div class="gw-chart-wrap gw-chart-wrap-large"><canvas id="assetIssuanceLineChart"></canvas></div>
+  </article>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function () {
+  const health = <?=json_encode($healthChart, JSON_UNESCAPED_SLASHES)?>;
+  const issuance = <?=json_encode($assetIssuanceChart, JSON_UNESCAPED_SLASHES)?>;
+  const barCanvas = document.getElementById('healthGovernanceBarChart');
+  const lineCanvas = document.getElementById('assetIssuanceLineChart');
+  if (barCanvas && window.Chart) {
+    new Chart(barCanvas, {
+      type: 'bar',
+      data: {
+        labels: health.labels,
+        datasets: [{
+          label: 'Health, Safety & Governance records',
+          data: health.values,
+          borderWidth: 1,
+          borderRadius: 6
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+        plugins: { legend: { position: 'top' } }
+      }
+    });
+  }
+  if (lineCanvas && window.Chart) {
+    new Chart(lineCanvas, {
+      type: 'line',
+      data: {
+        labels: issuance.labels,
+        datasets: issuance.datasets.map(function (dataset) {
+          return Object.assign({pointHoverRadius: 6}, dataset);
+        })
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+        plugins: { legend: { position: 'top' } }
+      }
+    });
+  }
+})();
+</script>
+
+<?php if (($u=current_user()) && ($u['role'] ?? '') === 'Administrator'):
+$staffActivity=service('reports')->staffActivity(30);
+$staffCounts=service('reports')->staffActivityCounts();
+?>
+<section class="gw-panel staff-tracking-panel" style="margin-top:20px">
+  <div class="gw-panel-head"><h2>Staff Activity Tracking</h2><span>Health, Safety &amp; Welfare · Legal &amp; Compliance · Asset &amp; Equipment Issuance</span></div>
+  <div class="gw-stats" style="margin-top:0">
+  <?php
+  $labels=[
+    'Health, Safety & Welfare'=>'Health, Safety & Welfare',
+    'Legal & Compliance'=>'Legal & Compliance',
+    'Asset & Equipment Issuance'=>'Asset & Equipment Issuance'
+  ];
+  foreach($labels as $key=>$label):
+    $count=0; foreach($staffCounts as $sc){ if($sc['module']===$key){$count=(int)$sc['activity_count'];break;} }
+  ?>
+    <div class="gw-stat"><span class="gw-stat-label"><?=e($label)?></span><div class="gw-stat-value"><?=e($count)?></div><div class="gw-stat-meta">Staff actions recorded</div></div>
+  <?php endforeach; ?>
+  </div>
+  <div class="table-wrap" style="margin-top:18px"><table class="data-table">
+    <thead><tr><th>Staff</th><th>Module</th><th>Action</th><th>Details</th><th>Date &amp; Time</th></tr></thead>
+    <tbody>
+    <?php foreach($staffActivity as $a): ?>
+      <tr><td><?=e($a['staff_name'])?><br><small><?=e($a['email'])?></small></td><td><?=e($a['module'])?></td><td><?=e($a['action'])?></td><td><?=e($a['details'])?></td><td><?=e($a['created_at'])?></td></tr>
+    <?php endforeach; ?>
+    <?php if(!$staffActivity): ?><tr><td colspan="5" class="empty">No staff activity has been recorded yet.</td></tr><?php endif; ?>
+    </tbody>
+  </table></div>
+</section>
+<?php endif; ?>
+
+<?php page_footer(); ?>
