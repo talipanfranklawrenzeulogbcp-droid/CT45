@@ -1,6 +1,59 @@
 /* Great Solomon Manpower Services Inc. Core Transaction 4 - single combined JavaScript file */
+
+/* Preserve the user's exact viewport position across normal form updates.
+   Server-side POST/redirect/GET flows stay unchanged; this only restores the
+   scroll position after the browser loads the resulting page. */
+(function(){
+  const KEY='ct4_pending_scroll_position_v1';
+  function save(){
+    try{
+      sessionStorage.setItem(KEY,JSON.stringify({
+        x:window.scrollX||0,
+        y:window.scrollY||0,
+        path:window.location.pathname,
+        time:Date.now()
+      }));
+    }catch(_){}
+  }
+  /* Use a second listener so defaultPrevented can be checked after submit handlers. */
+  document.addEventListener('submit',function(e){
+    const form=e.target;
+    if(!form || (form.target && form.target!=='_self')) return;
+    queueMicrotask(function(){
+      if(e.defaultPrevented) return;
+      const method=(form.getAttribute('method')||'get').toLowerCase();
+      if(method!=='get' && method!=='post') return;
+      try{
+        const action=new URL(form.getAttribute('action')||window.location.href,window.location.href);
+        if(action.origin!==window.location.origin) return;
+      }catch(_){ return; }
+      save();
+    });
+  });
+  function restore(){
+    try{
+      const raw=sessionStorage.getItem(KEY);
+      if(!raw)return;
+      const state=JSON.parse(raw);
+      if(!state || Date.now()-Number(state.time||0)>15000)return sessionStorage.removeItem(KEY);
+      sessionStorage.removeItem(KEY);
+      const restoreNow=()=>{
+        window.scrollTo({left:Number(state.x)||0,top:Number(state.y)||0,behavior:'auto'});
+      };
+      /* Run after DOM/layout and after native #anchor handling. */
+      requestAnimationFrame(()=>requestAnimationFrame(restoreNow));
+    }catch(_){}
+  }
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',restore,{once:true});
+  }else{
+    restore();
+  }
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   if(window.FEEDBACK_SENT){ setTimeout(showFeedbackSentModal, 100); }
+  initNotificationWatcher();
   const toggle=document.getElementById('sidebarToggle');
   const sidebar=document.getElementById('sidebar');
   const backdrop=document.getElementById('sidebar-backdrop');
@@ -9,7 +62,74 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.getElementById('modalRoot')?.replaceChildren();sidebar?.classList.remove('open');backdrop?.classList.remove('show');}});
   document.querySelectorAll('input[type="number"]').forEach(i=>i.addEventListener('wheel',e=>e.preventDefault(),{passive:false}));
   document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',()=>{const btn=form.querySelector('button[type="submit"],button:not([type])');if(btn){btn.disabled=true;btn.dataset.originalText=btn.innerHTML;btn.innerHTML='<span class="material-symbols-outlined">hourglass_top</span> Processing...';setTimeout(()=>{btn.disabled=false;btn.innerHTML=btn.dataset.originalText||'Submit';},4000);}}));
+  initResizableTables();
+  initUpdatePopups();
+
 });
+
+function initResizableTables(){
+  document.querySelectorAll('.table-wrap table, .feedback-data-table').forEach(table=>{
+    if(table.dataset.ctEnhanced==='1')return;
+    table.dataset.ctEnhanced='1';
+    if(!/(?:health_all|incident_all|login_all)=1/.test(window.location.search)) table.classList.add('ct-five-row-table');
+    table.classList.add('ct-resizable-table');
+    const wrap=table.closest('.table-wrap')||table.parentElement;
+    wrap?.classList.add('ct-table-scroll');
+    const headers=table.querySelectorAll('thead th');
+    if(!headers.length)return;
+    table.style.minWidth=Math.max(100,headers.length*125)+'px';
+    headers.forEach((th,index)=>{
+      th.classList.add('ct-resizable-th');
+      const grip=document.createElement('span');
+      grip.className='ct-col-resizer';
+      grip.setAttribute('aria-hidden','true');
+      th.appendChild(grip);
+      grip.addEventListener('pointerdown',e=>{
+        e.preventDefault(); e.stopPropagation();
+        const startX=e.clientX, startW=Math.max(70,th.getBoundingClientRect().width);
+        const move=ev=>{const w=Math.max(70,startW+(ev.clientX-startX));th.style.width=w+'px';};
+        const up=()=>{document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',up);};
+        document.addEventListener('pointermove',move);document.addEventListener('pointerup',up,{once:true});
+      });
+    });
+  });
+}
+function initUpdatePopups(){
+  document.querySelectorAll('form').forEach(form=>{
+    const action=form.querySelector('input[name="action"]')?.value||'';
+    if(!/^update_/i.test(action)||form.dataset.ctUpdatePopup==='1')return;
+    form.dataset.ctUpdatePopup='1';
+    const trigger=document.createElement('button');
+    trigger.type='button';
+    trigger.className='gw-btn secondary ct-update-trigger';
+    trigger.innerHTML='<span class="material-symbols-outlined">edit</span>Update';
+    trigger.addEventListener('click',()=>openUpdateForm(form));
+    form.hidden=true;
+    form.parentNode?.insertBefore(trigger,form);
+  });
+}
+function openUpdateForm(form){
+  const root=document.getElementById('modalRoot');if(!root)return;
+  const clone=form.cloneNode(true);
+  clone.hidden=false;
+  clone.removeAttribute('style');
+  clone.dataset.ctUpdateClone='1';
+  clone.querySelectorAll('button[type="submit"],button:not([type])').forEach(btn=>{
+    btn.classList.add('primary');
+    btn.innerHTML='<span class="material-symbols-outlined">save</span>Save Update';
+  });
+  const action=clone.querySelector('input[name="action"]')?.value||'update';
+  const title=action.replace(/^update_/i,'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+  const actions=document.createElement('div');
+  actions.className='record-actions';
+  const cancel=document.createElement('button');
+  cancel.type='button';cancel.className='gw-btn secondary';cancel.textContent='Cancel';cancel.onclick=closeModal;
+  actions.appendChild(cancel);
+  clone.appendChild(actions);
+  root.innerHTML=`<div class="gw-modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal update-form-modal"><div class="gw-modal-head"><div><strong>${escapeHtml(title)} Update</strong><small>Make changes and save without leaving the current page.</small></div><button class="gw-modal-close" onclick="closeModal()" aria-label="Close">×</button></div><div class="gw-modal-body" id="updateFormModalBody"></div></div></div>`;
+  document.getElementById('updateFormModalBody')?.appendChild(clone);
+}
+
 function showModal(title,body){const root=document.getElementById('modalRoot');if(!root)return;root.innerHTML=`<div class="gw-modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal"><div class="gw-modal-head"><strong>${escapeHtml(title)}</strong><button class="gw-modal-close" onclick="closeModal()"><span class="material-symbols-outlined">close</span></button></div><div class="gw-modal-body"><p style="font-size:12px;line-height:1.7;color:#64748b">${escapeHtml(body)}</p><div style="display:flex;justify-content:flex-end;margin-top:20px"><button class="gw-btn primary" onclick="closeModal()">Continue</button></div></div></div></div>`;}
 function closeModal(){document.getElementById('modalRoot')?.replaceChildren();}
 function escapeHtml(v){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
@@ -23,70 +143,164 @@ document.addEventListener('click',e=>{
  if(wrap && !wrap.contains(e.target)) document.getElementById('userMenu')?.classList.remove('open');
 });
 
-function showNotificationModal(){
- document.getElementById('userMenu')?.classList.remove('open');
- const root=document.getElementById('modalRoot'); if(!root)return;
- const isStaff=window.CURRENT_USER?.role==='Staff';
- const notes=isStaff?(Array.isArray(window.STAFF_NOTIFICATIONS)?window.STAFF_NOTIFICATIONS:[]):(Array.isArray(window.ADMIN_NOTIFICATIONS)?window.ADMIN_NOTIFICATIONS:[]);
- const title=isStaff?'Notifications':'Admin Notifications';
- const subtitle=isStaff?'Transferred data/files and replies to your feedback.':'Feedback received from staff members.';
- const empty=isStaff?'No notifications yet':'No staff feedback yet';
- const body=notes.length ? notes.map(n=>{
-   const unread=Number(n.is_read)===0;
-   const date=new Date(String(n.created_at).replace(' ','T'));
-   const when=isNaN(date.getTime())?escapeHtml(n.created_at||''):date.toLocaleString();
-   const reply=(window.CURRENT_USER?.role==='Administrator' && (n.type==='feedback' || !n.type))
-     ? `<div class="notification-actions"><button type="button" class="gw-btn secondary" onclick="showFeedbackReply(${Number(n.id)},${JSON.stringify(String(n.sender_name||'Staff'))},${JSON.stringify(String(n.sender_role||'Staff'))},${JSON.stringify(String(n.message||''))},${Number(n.sender_user_id||0)})"><span class="material-symbols-outlined">reply</span>Reply</button></div>` : '';
-   return `<div class="notification-card ${unread?'unread':''}">
-     <div class="notification-card-head"><div><strong>${escapeHtml(n.title||'Notification')}</strong><span>${escapeHtml(n.sender_name||'System')} · ${escapeHtml(n.sender_role||'System')}</span></div><small>${escapeHtml(when)}</small></div>
-     <p>${escapeHtml(n.message||'')}</p>${reply}
-   </div>`;
- }).join('') : `<div class="notification-empty"><span class="material-symbols-outlined">notifications_none</span><strong>${empty}</strong><p>${escapeHtml(subtitle)}</p></div>`;
- root.innerHTML=`<div class="gw-modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal notifications-modal">
-   <div class="gw-modal-head"><div><strong>${title}</strong><small>${subtitle}</small></div><button class="gw-modal-close" onclick="closeModal()" aria-label="Close">×</button></div>
-   <div class="gw-modal-body"><div class="notification-list">${body}</div><div class="record-actions"><button class="gw-btn primary" onclick="closeModal()">Close</button></div></div>
- </div></div>`;
- fetch(`${window.APP_BASE||''}/includes/mark_notifications_read.php`,{method:'POST',headers:{'X-Requested-With':'XMLHttpRequest'},credentials:'same-origin'}).catch(()=>{});
- document.querySelector('.notification-badge')?.remove();
-}
-function showFeedbackReply(notificationId,staffName,staffRole,originalMessage){
- closeModal();
- showFeedbackModal({replyTo:Number(notificationId),recipientName:staffName,recipientRole:staffRole,originalMessage:originalMessage});
-}
-function showFeedbackSentModal(){
- const root=document.getElementById('modalRoot'); if(!root)return;
- root.innerHTML=`<div class="gw-modal-backdrop"><div class="gw-modal feedback-sent-modal">
-   <div class="feedback-sent-icon"><span class="material-symbols-outlined">mark_email_read</span></div>
-   <div class="gw-modal-body feedback-sent-body"><strong>Success</strong><p>Your message has been sent successfully.</p><button class="gw-btn primary" onclick="closeModal()">Done</button></div>
- </div></div>`;
+function initNotificationWatcher(){
+ const topButton=document.querySelector('.gw-notification-trigger');
+ if(!topButton || !window.CURRENT_USER?.role)return;
+ let lastKnownId=0;
+ const seeded=[...(window.ADMIN_NOTIFICATIONS||[]),...(window.STAFF_NOTIFICATIONS||[])];
+ if(seeded.length) lastKnownId=Math.max(...seeded.map(n=>Number(n.id)||0));
+ let first=true;
+ const updateBadge=(count)=>{
+   if(count>0){
+     topButton?.classList.add('has-new-notification');
+     let topBadge=topButton?.querySelector('.top-notification-badge');
+     if(topButton && !topBadge){topBadge=document.createElement('span');topBadge.className='top-notification-badge';topButton.appendChild(topBadge);}
+     if(topBadge)topBadge.textContent=count>99?'99+':String(count);
+     topButton.setAttribute('aria-label',`Notifications${count>0?` — ${count} unread`:''}`);
+   }else{
+     topButton?.classList.remove('has-new-notification');
+     topButton?.querySelector('.top-notification-badge')?.remove();
+     topButton.setAttribute('aria-label','Open notifications');
+   }
+ };
+ const notifyNew=(latest)=>{
+   if(!latest)return;
+   const title=latest.title||'New notification';
+   const text=latest.message||'You have a new notification.';
+   let toast=document.getElementById('notificationToast');
+   if(!toast){
+     toast=document.createElement('div');
+     toast.id='notificationToast';
+     toast.className='notification-toast';
+     document.body.appendChild(toast);
+   }
+   toast.innerHTML=`<span class="material-symbols-outlined">notifications_active</span><div><strong>${escapeHtml(title)}</strong><span>${escapeHtml(text.length>120?text.slice(0,117)+'...':text)}</span></div><button type="button" aria-label="Open notifications"><span class="material-symbols-outlined">arrow_forward</span></button>`;
+   toast.querySelector('button')?.addEventListener('click',()=>{toast.classList.remove('show');showNotificationModal();});
+   requestAnimationFrame(()=>toast.classList.add('show'));
+   clearTimeout(window.__notificationToastTimer);
+   window.__notificationToastTimer=setTimeout(()=>toast.classList.remove('show'),7000);
+ };
+ const check=()=>fetch(`${window.APP_BASE||''}/includes/notifications_status.php`,{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'},cache:'no-store'})
+   .then(r=>r.ok?r.json():null).then(data=>{
+     if(!data?.ok)return;
+     updateBadge(Number(data.count)||0);
+     const id=Number(data.latest?.id)||0;
+     if(!first && id>lastKnownId)notifyNew(data.latest);
+     if(id>lastKnownId)lastKnownId=id;
+     first=false;
+   }).catch(()=>{first=false;});
+ check();
+ window.__notificationWatcher=setInterval(check,15000);
 }
 
-function showFeedbackModal(replyContext=null){
- document.getElementById('userMenu')?.classList.remove('open');
- const root=document.getElementById('modalRoot'); if(!root)return;
- const user=window.CURRENT_USER||{name:'User',role:'Staff'};
- const replying=!!replyContext;
- const recipientName=replyContext?.recipientName||'';
- const recipientRole=replyContext?.recipientRole||'';
- const original=replyContext?.originalMessage||'';
- root.innerHTML=`<div class="gw-modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal feedback-modal">
- <div class="gw-modal-head"><div><strong>${replying?'Reply to Feedback':'Send Feedback'}</strong><small>${replying?'Send a response directly to '+escapeHtml(recipientName)+'.':'Help us improve the Great Solomon Manpower Services system.'}</small></div><button class="gw-modal-close" onclick="closeModal()" aria-label="Close">×</button></div>
- <div class="gw-modal-body">
- ${replying?`<div class="feedback-reply-context"><strong>Original feedback from ${escapeHtml(recipientName)} (${escapeHtml(recipientRole)})</strong><p>${escapeHtml(original)}</p></div>`:`<div class="feedback-intro"><span class="material-symbols-outlined">rate_review</span><div><strong>Your account details are automatic</strong><p>Your name and role are taken from the account currently signed in.</p></div></div>`}
- <form method="post" action="${window.APP_BASE||''}/includes/feedback.php">
- <input type="hidden" name="return_to" value="${escapeHtml(window.location.pathname + window.location.search)}">
- ${replying?`<input type="hidden" name="action" value="reply"><input type="hidden" name="notification_id" value="${Number(replyContext.replyTo)}">`:''}
- <div class="feedback-account-grid"><div class="feedback-readonly-field"><label>${replying?'From':'Name'}</label><div class="feedback-readonly-value"><span class="material-symbols-outlined">person</span>${escapeHtml(user.name)}</div></div><div class="feedback-readonly-field"><label>${replying?'To':'Role'}</label><div class="feedback-readonly-value"><span class="material-symbols-outlined">${replying?'person':'badge'}</span>${escapeHtml(replying?recipientName:user.role)}</div></div></div>
- <div class="feedback-message-field"><label for="feedbackText">${replying?'Reply':'Your Feedback'}</label><textarea id="feedbackText" name="feedback" rows="7" required maxlength="3000" placeholder="${replying?'Write your reply...':'Tell us what worked well, what should be improved, or if you found a problem...'}"></textarea><div class="feedback-helper">Please avoid including passwords or other sensitive information.</div></div>
- <div class="record-actions"><button type="button" class="gw-btn secondary" onclick="closeModal()">Cancel</button><button class="gw-btn primary" type="submit"><span class="material-symbols-outlined">${replying?'reply':'send'}</span>${replying?'Send Reply':'Send Feedback'}</button></div>
- </form></div></div></div>`;
- setTimeout(()=>document.getElementById('feedbackText')?.focus(),50);
+function feedbackStatusBadge(status){
+  const s=String(status||'New');
+  return `<span class="feedback-status-badge ${s.toLowerCase().replace(/\s+/g,'-')}">${escapeHtml(s)}</span>`;
 }
+function feedbackPriorityBadge(priority){
+  return `<span class="feedback-priority-badge ${String(priority||'Medium').toLowerCase()}">${escapeHtml(priority||'Medium')}</span>`;
+}
+function feedbackOwns(thread){
+  const uid=Number(window.CURRENT_USER?.id||0);
+  return uid>0 && Number(thread?.user_id||0)===uid;
+}
+async function reloadFeedbackThreads(){
+  try{
+    const r=await fetch(`${window.APP_BASE||''}/includes/feedback_threads.php`,{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'},cache:'no-store'});
+    const d=await r.json().catch(()=>null);
+    if(r.ok&&d?.ok&&Array.isArray(d.threads)){window.FEEDBACK_THREADS=d.threads;return true;}
+  }catch(_e){}
+  return false;
+}
+function showFeedbackSentModal(){
+  const root=document.getElementById('modalRoot');if(!root)return;
+  root.innerHTML=`<div class="gw-modal-backdrop"><div class="gw-modal feedback-sent-modal"><div class="feedback-sent-icon"><span class="material-symbols-outlined">mark_email_read</span></div><div class="gw-modal-body feedback-sent-body"><strong>Feedback Sent</strong><p>Your feedback has been sent successfully.</p><button class="gw-btn primary" onclick="closeModal()">Done</button></div></div></div>`;
+}
+function showFeedbackModal(){
+  document.getElementById('userMenu')?.classList.remove('open');
+  const root=document.getElementById('modalRoot');if(!root)return;
+  const user=window.CURRENT_USER||{name:'User',role:'Staff'};
+  root.innerHTML=`<div class="gw-modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal feedback-modal"><div class="gw-modal-head"><div><strong>Send Feedback</strong><small>Submit feedback from your signed-in account.</small></div><button class="gw-modal-close" onclick="closeModal()">×</button></div><div class="gw-modal-body"><div class="feedback-intro"><span class="material-symbols-outlined">rate_review</span><div><strong>Your account details are automatic</strong><p>Your name and role are taken from the account currently signed in.</p></div></div><form method="post" action="${window.APP_BASE||''}/includes/feedback.php"><input type="hidden" name="csrf_token" value="${escapeHtml(window.CSRF_TOKEN||'')}"/><input type="hidden" name="return_to" value="${escapeHtml(window.location.pathname+window.location.search)}"/><input type="hidden" name="action" value="send"/><div class="feedback-account-grid"><div class="feedback-readonly-field"><label>Name</label><div class="feedback-readonly-value"><span class="material-symbols-outlined">person</span>${escapeHtml(user.name)}</div></div><div class="feedback-readonly-field"><label>Role</label><div class="feedback-readonly-value"><span class="material-symbols-outlined">badge</span>${escapeHtml(user.role)}</div></div></div><div class="feedback-form-grid"><div class="feedback-message-field"><label for="feedbackSubject">Subject <span class="field-required">*</span></label><input id="feedbackSubject" name="subject" maxlength="180" placeholder="Example: Unable to save a safety report" required/></div><div class="feedback-message-field"><label for="feedbackCategory">Category <span class="field-required">*</span></label><select id="feedbackCategory" name="category"><option>General Feedback</option><option>Bug / System Problem</option><option>Suggestion</option><option>Complaint</option><option>Security Concern</option><option>Data Problem</option></select></div><div class="feedback-message-field"><label for="feedbackPriority">Priority <span class="field-required">*</span></label><select id="feedbackPriority" name="priority"><option>Low</option><option selected>Medium</option><option>High</option><option>Critical</option></select></div></div><div class="feedback-message-field"><div class="feedback-label-row"><label for="feedbackText">Your Feedback <span class="field-required">*</span></label><span id="feedbackTextCount">0 / 3000</span></div><textarea id="feedbackText" name="feedback" rows="7" required maxlength="3000" placeholder="Describe your feedback clearly..."></textarea><div class="feedback-helper">Do not enter passwords or confidential credentials.</div></div><div class="record-actions"><button type="button" class="gw-btn secondary" onclick="closeModal()">Cancel</button><button class="gw-btn primary" type="submit"><span class="material-symbols-outlined">send</span>Send Feedback</button></div></form></div></div></div>`;
+  const text=document.getElementById('feedbackText'),count=document.getElementById('feedbackTextCount');
+  if(text&&count){const update=()=>count.textContent=`${text.value.length} / 3000`;text.addEventListener('input',update);update();}
+  setTimeout(()=>document.getElementById('feedbackSubject')?.focus(),50);
+}
+function renderAdminFeedbackCards(threads){
+  if(!threads.length)return `<div class="notification-empty"><span class="material-symbols-outlined">feedback</span><strong>No employee feedback yet</strong><p>New Staff feedback will appear here.</p></div>`;
+  return threads.map(t=>{const first=Array.isArray(t.messages)&&t.messages.length?t.messages[0]:null;return `<div class="notification-card feedback-thread-card"><div class="notification-card-head"><div><strong>${escapeHtml(t.subject||'Feedback')}</strong><span>${escapeHtml(t.owner_name||'Employee')} · ${escapeHtml(t.category||'General Feedback')}</span></div><small>${renderDate(t.created_at)}</small></div><div class="feedback-thread-meta">${feedbackPriorityBadge(t.priority)} ${feedbackStatusBadge(t.status)}</div><p>${escapeHtml(first?.message||t.last_message||'No message')}</p><div class="notification-actions"><button type="button" class="gw-btn secondary" onclick="showFeedbackThread(${Number(t.id)})"><span class="material-symbols-outlined">visibility</span>View</button><button type="button" class="gw-btn btn-danger" onclick="deleteEmployeeFeedback(${Number(t.id)})"><span class="material-symbols-outlined">archive</span>Delete</button></div></div>`;}).join('');
+}
+async function deleteEmployeeFeedback(threadId){
+  const t=(window.FEEDBACK_THREADS||[]).find(x=>Number(x.id)===Number(threadId)); if(!t)return;
+  if(!confirm(`Delete “${t.subject||'this feedback'}”? It will first be moved to Archive.`))return;
+  const body=new URLSearchParams({action:'admin_delete',thread_id:String(threadId),csrf_token:String(window.CSRF_TOKEN||''),return_to:window.location.pathname+window.location.search});
+  try{const r=await fetch(`${window.APP_BASE||''}/includes/feedback.php`,{method:'POST',credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:body.toString()});const d=await r.json().catch(()=>({ok:false,message:'Invalid server response.'}));if(!r.ok||!d.ok)throw new Error(d.message||'Unable to delete feedback.');await reloadFeedbackThreads();await showNotificationModal(false);}catch(e){alert(e.message||'Unable to delete feedback.');}
+}
+function renderFeedbackCards(threads,isAdmin){
+  if(!threads.length)return `<div class="notification-empty"><span class="material-symbols-outlined">feedback</span><strong>No feedback yet</strong><p>Use “Send Feedback” to submit a new feedback record.</p></div>`;
+  return threads.map(t=>{
+    const first=Array.isArray(t.messages)&&t.messages.length?t.messages[0]:null;
+    const own=feedbackOwns(t);
+    const canUnsend=own;
+    const actions=canUnsend
+      ? `<button type="button" class="gw-btn btn-danger" onclick="unsendFeedback(${Number(t.id)})"><span class="material-symbols-outlined">undo</span>Unsend</button>`
+      : '';
+    return `<div class="notification-card feedback-thread-card">
+      <div class="notification-card-head"><div><strong>${escapeHtml(t.subject||'Feedback')}</strong><span>${escapeHtml(t.owner_name||'User')} · ${escapeHtml(t.category||'General Feedback')}</span></div><small>${renderDate(t.created_at)}</small></div>
+      <div class="feedback-thread-meta">${feedbackPriorityBadge(t.priority)} ${feedbackStatusBadge(t.status)}</div>
+      <p>${escapeHtml(first?.message||t.last_message||'No message')}</p>
+      ${actions?`<div class="notification-actions">${actions}</div>`:''}
+    </div>`;
+  }).join('');
+}
+async function showNotificationModal(fresh=true){
+  if(fresh)await reloadFeedbackThreads();
+  const root=document.getElementById('modalRoot');if(!root)return;
+  const user=window.CURRENT_USER||{};
+  if(user.role!=='Staff' && user.role!=='Administrator'){ closeModal(); return; }
+  const threads=Array.isArray(window.FEEDBACK_THREADS)?window.FEEDBACK_THREADS:[];
+  const visible=user.role==='Administrator' ? threads : threads.filter(feedbackOwns);
+  if(user.role==='Administrator'){
+    root.innerHTML=`<div class="gw-modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal notifications-modal feedback-inbox-modal">
+      <div class="gw-modal-head"><div><strong>Employee Feedback</strong><small>View employee feedback and move records to Archive.</small></div><button class="gw-modal-close" onclick="closeModal()" aria-label="Close">×</button></div>
+      <div class="gw-modal-body"><div class="feedback-inbox-toolbar"><div><strong>${visible.length}</strong><span>employee feedback record${visible.length===1?'':'s'}</span></div></div>
+      <div id="feedbackThreadList" class="notification-list">${renderAdminFeedbackCards(visible)}</div>
+      <div class="record-actions"><button class="gw-btn primary" onclick="closeModal()">Close</button></div></div></div></div>`;
+    return;
+  }
+  root.innerHTML=`<div class="gw-modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal notifications-modal feedback-inbox-modal">
+    <div class="gw-modal-head"><div><strong>Feedback</strong><small>Send and unsend your feedback.</small></div><button class="gw-modal-close" onclick="closeModal()" aria-label="Close">×</button></div>
+    <div class="gw-modal-body"><div class="feedback-inbox-toolbar"><div><strong>${visible.length}</strong><span>feedback record${visible.length===1?'':'s'}</span></div><button class="gw-btn primary" type="button" onclick="showFeedbackModal()"><span class="material-symbols-outlined">add_comment</span>Send Feedback</button></div>
+    <div id="feedbackThreadList" class="notification-list">${renderFeedbackCards(visible,false)}</div>
+    <div class="record-actions"><button class="gw-btn primary" onclick="closeModal()">Close</button></div></div></div></div>`;
+  fetch(`${window.APP_BASE||''}/includes/mark_notifications_read.php`,{method:'POST',headers:{'X-Requested-With':'XMLHttpRequest','X-CSRF-Token':window.CSRF_TOKEN||''},credentials:'same-origin'}).catch(()=>{});
+}
+async function handleNotificationBell(){ await showNotificationModal(true); }
+async function unsendFeedback(threadId){
+  const id=Number(threadId)||0;if(!id)return;
+  const t=(window.FEEDBACK_THREADS||[]).find(x=>Number(x.id)===id);
+  if(!t||!feedbackOwns(t))return;
+  if(!confirm(`Unsend “${t.subject||'this feedback'}”? This will remove your feedback record.`))return;
+  const body=new URLSearchParams({action:'unsend',thread_id:String(id),csrf_token:String(window.CSRF_TOKEN||''),return_to:window.location.pathname+window.location.search});
+  try{
+    const r=await fetch(`${window.APP_BASE||''}/includes/feedback.php`,{method:'POST',credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:body.toString()});
+    const d=await r.json().catch(()=>({ok:false,message:'Invalid server response.'}));
+    if(!r.ok||!d.ok)throw new Error(d.message||'Unable to unsend feedback.');
+    await reloadFeedbackThreads(); await showNotificationModal(false);
+  }catch(e){alert(e.message||'Unable to unsend feedback.');}
+}
+async function showFeedbackThread(threadId){
+  const t=(window.FEEDBACK_THREADS||[]).find(x=>Number(x.id)===Number(threadId));if(!t)return;
+  const first=Array.isArray(t.messages)&&t.messages.length?t.messages[0]:null;
+  const root=document.getElementById('modalRoot');if(!root)return;
+  root.innerHTML=`<div class="gw-modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal feedback-modal feedback-thread-detail"><div class="gw-modal-head"><div><strong>${escapeHtml(t.subject||'Feedback')}</strong><small>${escapeHtml(t.owner_name||'User')} · ${escapeHtml(t.category||'General Feedback')}</small></div><button class="gw-modal-close" onclick="closeModal()">×</button></div><div class="gw-modal-body"><div class="feedback-chat-scroll feedback-thread-history"><div class="feedback-bubble feedback-bubble-out"><strong>${escapeHtml(first?.sender_name||t.owner_name||'User')}</strong><small>${renderDate(first?.created_at||t.created_at)}</small><p>${escapeHtml(first?.message||t.last_message||'')}</p></div></div><div class="record-actions">${(window.CURRENT_USER?.role==='Administrator')?`<button class="gw-btn btn-danger" type="button" onclick="deleteEmployeeFeedback(${Number(t.id)})">Delete Feedback</button>`:(feedbackOwns(t)?`<button class="gw-btn btn-danger" type="button" onclick="unsendFeedback(${Number(t.id)})">Unsend Feedback</button>`:'')}<button class="gw-btn secondary" type="button" onclick="closeModal()">Close</button></div></div></div></div>`;
+}
+function refreshFeedbackDataTable(){ return; }
+function renderFeedbackDataTable(){ return; }
 function showTermsModal(){
  document.getElementById('userMenu')?.classList.remove('open');
  const root=document.getElementById('modalRoot'); if(!root)return;
  root.innerHTML=`<div class="gw-modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal terms-modal">
- <div class="gw-modal-head"><div><strong>Terms and Conditions</strong><small>Great Solomon Manpower Services Inc. — Core Transaction 4</small></div><button class="gw-modal-close" onclick="closeModal()" aria-label="Close">×</button></div>
+ <div class="gw-modal-head"><div><strong>Terms and Conditions</strong><small>Great Solomon Manpower Services Inc. — Core Transaction 4</small></div></div>
  <div class="gw-modal-body terms-body">
  <p>By accessing and using this system, you acknowledge that it is intended only for authorized Great Solomon Manpower Services Inc. administrators and staff. You are responsible for using your assigned account appropriately, keeping your password and verification information confidential, and ensuring that records you create or update are accurate and used only for legitimate company purposes. Sharing accounts, attempting to access another user's account, bypassing access controls, or using the system for unauthorized purposes is prohibited.</p>
  <p>The system processes personal and, where applicable, sensitive personal information. The company will handle such information in accordance with the <strong>Data Privacy Act of 2012 (Republic Act No. 10173)</strong>, including its principles on transparency, legitimate purpose, proportionality, and appropriate protection of personal information. Users must not disclose, copy, download, or otherwise process personal information beyond what is authorized for their work responsibilities.</p>
@@ -94,21 +308,23 @@ function showTermsModal(){
  <p>For workplace health and safety records, users must enter and maintain information responsibly and support the company's safety processes. The <strong>Occupational Safety and Health Standards Law (Republic Act No. 11058)</strong> strengthens compliance with occupational safety and health standards and provides duties and protections relating to workplace hazards, safety programs, training, incident reporting, and worker safety. Records in this system should therefore be used only for authorized health, safety, welfare, and compliance purposes.</p>
  <p>Electronic records, messages, and transactions handled through this system may also be subject to the <strong>Electronic Commerce Act of 2000 (Republic Act No. 8792)</strong> and other applicable Philippine laws and regulations. By continuing to use the system, you agree to follow company policies, applicable laws, and authorized instructions; system activity may be logged for security, audit, operational, and compliance purposes. These terms describe system-use rules and are not a substitute for legal advice; applicable laws and regulations prevail where they conflict with these terms.</p>
  <div class="terms-note"><span class="material-symbols-outlined">verified_user</span><span>Use the system responsibly and report security, privacy, or data-quality concerns to the appropriate administrator.</span></div>
- <div class="record-actions"><button type="button" class="gw-btn primary" onclick="closeModal()">I Understand</button></div>
+ <div class="terms-confirmation"><label class="auth-checkbox"><input type="checkbox" id="modalTermsCheckbox"><span>I have read and agree to these Terms and Conditions.</span></label><button type="button" class="gw-btn primary" id="modalTermsConfirm" disabled onclick="if(document.getElementById('modalTermsCheckbox')?.checked)closeModal()">Confirm Terms</button></div>
  </div></div></div>`;
+ const box=document.getElementById('modalTermsCheckbox'), confirm=document.getElementById('modalTermsConfirm');
+ box?.addEventListener('change',()=>{if(confirm)confirm.disabled=!box.checked;});
 }
 function showEditUserModal(id,name,email,role){
  const root=document.getElementById('modalRoot'); if(!root)return;
  root.innerHTML=`<div class="gw-modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal">
  <div class="gw-modal-head"><strong>Edit User Account</strong><button class="gw-modal-close" onclick="closeModal()">×</button></div>
  <div class="gw-modal-body"><form method="post" action="${window.location.pathname}">
- <input type="hidden" name="action" value="edit_user"><input type="hidden" name="id" value="${escapeHtml(id)}">
+ <input type="hidden" name="csrf_token" value="${escapeHtml(window.CSRF_TOKEN||'')}"><input type="hidden" name="action" value="edit_user"><input type="hidden" name="id" value="${escapeHtml(id)}">
  <div class="form-grid edit-user-fields">
  <div class="full"><label>New Name</label><input class="edit-user-input" name="name" value="${escapeHtml(name)}" required autocomplete="name"></div>
  <div class="full"><label>New Email</label><input class="edit-user-input" type="email" name="email" value="${escapeHtml(email)}" required autocomplete="email"></div>
  <div class="full"><label>New Role</label><select class="edit-user-input" name="role" required><option value="Administrator" ${role==="Administrator"?"selected":""}>Administrator</option><option value="Staff" ${role==="Staff"?"selected":""}>Staff</option></select></div>
  <div class="full"><label>New Password</label><input class="edit-user-input" type="password" name="password" minlength="6" placeholder="Leave blank to keep current password" autocomplete="new-password"></div></div>
- <div class="record-actions"><button type="button" class="gw-btn secondary" onclick="closeModal()">Cancel</button><button class="gw-btn primary">Save Changes</button></div>
+ <div class="record-actions"><button type="button" class="gw-btn secondary" onclick="closeModal()">Cancel</button><button class="gw-btn primary"><span class="material-symbols-outlined">save</span>Save Changes</button></div>
  </form></div></div></div>`;
 }
 
@@ -137,7 +353,7 @@ document.addEventListener('DOMContentLoaded',()=>{
    history.push({role:'user',text:text});
    save(); input.value=''; input.style.height='auto'; setBusy(true);
    const thinking=document.createElement('div'); thinking.className='ai-message assistant ai-thinking'; thinking.innerHTML='<div class="ai-msg-icon"><span class="material-symbols-outlined">auto_awesome</span></div><div><strong>CT4 AI</strong><p><span class="ai-dots">Thinking…</span></p></div>'; messages.appendChild(thinking); messages.scrollTop=messages.scrollHeight;
-   const fd=new FormData(); fd.append('message',text); fd.append('history',JSON.stringify(history.slice(-8)));
+   const fd=new FormData(); fd.append('csrf_token',window.CSRF_TOKEN||''); fd.append('message',text); fd.append('history',JSON.stringify(history.slice(-8)));
    fetch(base+'/services/api/gemini.php',{method:'POST',body:fd,credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}})
     .then(r=>r.json().catch(()=>({ok:false,error:'Invalid server response.'})).then(data=>({status:r.status,data})))
     .then(({data})=>{
@@ -194,7 +410,7 @@ function handleDataStorageUpload(e){
   const btn=document.getElementById('dataStorageUploadBtn');
   const originalHtml=btn?btn.innerHTML:'';
   if(btn){ btn.disabled=true; btn.innerHTML='<span class="material-symbols-outlined">hourglass_top</span> Uploading...'; }
-  const fd=new FormData(form);
+  const fd=new FormData(form); fd.append('csrf_token',window.CSRF_TOKEN||'');
   fetch(`${window.APP_BASE||''}/includes/data_storage.php?action=upload`,{
     method:'POST',
     body:fd,
@@ -256,7 +472,7 @@ function showStoredFile(id,name,type){
   </div></div>`;
 }
 function deleteStoredFile(id,name){
-  const fd=new FormData(); fd.append('id',id);
+  const fd=new FormData(); fd.append('csrf_token',window.CSRF_TOKEN||''); fd.append('id',id);
   if(!confirm('Delete '+name+'? The file will be moved to Archive and can be recovered later.')) return;
   fetch(`${window.APP_BASE||''}/includes/data_storage.php?action=delete`,{method:'POST',body:fd,credentials:'same-origin'})
    .then(r=>r.json()).then(data=>{if(!data.ok)throw new Error(data.error||'Delete failed.');window.DATA_STORAGE_HAS_FILES=null;showDataStorageModal();})
@@ -372,9 +588,13 @@ function showArchiveModal(){
   const root=document.getElementById('modalRoot'); if(!root)return;
   root.innerHTML=`<div class="gw-modal-backdrop archive-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal archive-modal">
     <div class="gw-modal-head"><div><strong>Archive</strong><small>Deleted data and files retained for recovery.</small></div><button class="gw-modal-close" onclick="closeModal()">×</button></div>
-    <div class="gw-modal-body"><div id="archiveList" class="data-storage-list"><div class="data-storage-loading"><span class="material-symbols-outlined">progress_activity</span>Loading archive...</div></div></div>
+    <div class="gw-modal-body"><div class="archive-toolbar"><select id="archiveTypeFilter" onchange="loadArchiveItems(this.value)"><option value="">All archived data</option><option value="feedback">Employee Feedback</option><option value="record">Records</option><option value="file">Files</option></select>${(window.CURRENT_USER?.role==='Administrator')?`<div class="archive-backup-actions"><a class="gw-btn secondary" href="${window.APP_BASE||''}/includes/archive.php?action=backup&type=all"><span class="material-symbols-outlined">download</span>Backup All</a><a class="gw-btn secondary" href="${window.APP_BASE||''}/includes/archive.php?action=backup&type=feedback"><span class="material-symbols-outlined">download</span>Backup Feedback</a></div>`:''}</div><div id="archiveList" class="data-storage-list"><div class="data-storage-loading"><span class="material-symbols-outlined">progress_activity</span>Loading archive...</div></div></div>
   </div></div>`;
-  fetch(`${window.APP_BASE||''}/includes/archive.php?action=list`,{credentials:'same-origin'})
+  loadArchiveItems('');
+}
+function loadArchiveItems(type){
+  const box=document.getElementById('archiveList'); if(!box)return; box.innerHTML='<div class="data-storage-loading"><span class="material-symbols-outlined">progress_activity</span>Loading archive...</div>';
+  fetch(`${window.APP_BASE||''}/includes/archive.php?action=list${type?'&type='+encodeURIComponent(type):''}`,{credentials:'same-origin'})
    .then(r=>r.json()).then(data=>{
     const box=document.getElementById('archiveList'); if(!box)return;
     if(!data.ok||!data.items?.length){box.innerHTML='<div class="notification-empty"><span class="material-symbols-outlined">inventory_2</span><strong>Archive is empty</strong><p>Deleted data and files will appear here.</p></div>';return;}
@@ -389,14 +609,14 @@ function showArchiveModal(){
    }).catch(()=>{const box=document.getElementById('archiveList');if(box)box.innerHTML='<div class="notification-empty"><strong>Unable to load archive.</strong><p>Please try again.</p></div>';});
 }
 function recoverArchive(id){
-  const fd=new FormData(); fd.append('id',id); fd.append('action','recover');
+  const fd=new FormData(); fd.append('csrf_token',window.CSRF_TOKEN||''); fd.append('id',id); fd.append('action','recover');
   fetch(`${window.APP_BASE||''}/includes/archive.php?action=recover`,{method:'POST',body:fd,credentials:'same-origin'})
    .then(r=>r.json()).then(data=>{if(!data.ok)throw new Error(data.error||'Recovery failed.');window.DATA_STORAGE_HAS_FILES=null;showArchiveModal();})
    .catch(e=>showModal('Recovery failed',e.message));
 }
 function deleteArchiveItem(id,name){
   if(!confirm('Permanently delete "'+name+'"? This action cannot be undone.')) return;
-  const fd=new FormData(); fd.append('id',id); fd.append('action','delete');
+  const fd=new FormData(); fd.append('csrf_token',window.CSRF_TOKEN||''); fd.append('id',id); fd.append('action','delete');
   fetch(`${window.APP_BASE||''}/includes/archive.php?action=delete`,{method:'POST',body:fd,credentials:'same-origin'})
    .then(r=>r.json()).then(data=>{if(!data.ok)throw new Error(data.error||'Delete failed.');showArchiveModal();})
    .catch(e=>showModal('Delete failed',e.message));
@@ -415,43 +635,62 @@ function deleteArchiveItem(id,name){
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initModuleTop);else initModuleTop();
 })();
 
-/* Release-file picker: reuses Data Storage without exposing its management controls. */
-function getSelectedReleaseFiles(){
- const box=document.getElementById('releaseStorageFileIds');
- if(!box)return [];
- return [...box.querySelectorAll('input[name="storage_file_ids[]"]')].map(i=>Number(i.value)).filter(Boolean);
-}
-function renderSelectedReleaseFiles(){
- const display=document.getElementById('selectedReleaseFile'); if(!display)return;
- const items=window.SELECTED_RELEASE_FILES||[];
- display.innerHTML=items.length ? items.map(f=>`<div class="selected-file-chip"><span class="material-symbols-outlined">description</span><span class="selected-file-chip-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span><button type="button" onclick="removeReleaseFile(${Number(f.id)})" aria-label="Remove ${escapeHtml(f.name)}"><span class="material-symbols-outlined">close</span></button></div>`).join('') : '<div class="selected-file-note">No data/file selected.</div>';
- const hidden=document.getElementById('releaseStorageFileIds');
- if(hidden)hidden.innerHTML=items.map(f=>`<input type="hidden" name="storage_file_ids[]" value="${Number(f.id)}">`).join('');
-}
-function showReleaseFileStoragePicker(){
- const root=document.getElementById('modalRoot'); if(!root)return;
- const selected=new Set((window.SELECTED_RELEASE_FILES||[]).map(f=>Number(f.id)));
- root.innerHTML=`<div class="gw-modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="gw-modal data-storage-modal">
-   <div class="gw-modal-head"><div><strong>Data Storage</strong><small>Choose one or more data/files to release.</small></div><button class="gw-modal-close" onclick="closeModal()" aria-label="Close">×</button></div>
-   <div class="gw-modal-body"><div id="releaseStoragePickerList" class="data-storage-list"><div class="data-storage-loading"><span class="material-symbols-outlined">progress_activity</span>Loading stored files...</div></div><div class="record-actions"><button type="button" class="gw-btn primary" onclick="closeModal()">Done</button></div></div>
- </div></div>`;
- fetch(`${window.APP_BASE||''}/includes/data_storage.php?action=list`,{credentials:'same-origin'}).then(r=>r.json()).then(data=>{
-   const box=document.getElementById('releaseStoragePickerList'); if(!box)return;
-   if(!data.ok || !Array.isArray(data.items) || !data.items.length){box.innerHTML='<div class="notification-empty"><span class="material-symbols-outlined">folder_off</span><strong>NO DATA/FILES STORED YET.</strong></div>';return;}
-   box.innerHTML=data.items.map(f=>{
-     const checked=selected.has(Number(f.id));
-     return `<button type="button" class="data-storage-item ${checked?'selected-storage-item':''}" onclick="toggleReleaseFileSelection(${Number(f.id)},${JSON.stringify(String(f.file_name))},${JSON.stringify(String(f.file_type||''))})"><span class="data-storage-file-icon material-symbols-outlined">${checked?'check_circle':'description'}</span><span class="data-storage-file-main"><strong>${escapeHtml(f.file_name)}</strong><small>${escapeHtml(f.source_branch||'Other Branch')} · ${escapeHtml(formatBytes(f.file_size))}</small></span><span class="material-symbols-outlined">${checked?'check':'add'}</span></button>`;
-   }).join('');
- }).catch(()=>{const box=document.getElementById('releaseStoragePickerList');if(box)box.innerHTML='<div class="notification-empty"><span class="material-symbols-outlined">error</span><strong>UNABLE TO LOAD DATA/FILES.</strong><p>Please try again.</p></div>';});
-}
-function toggleReleaseFileSelection(id,name,type){
- window.SELECTED_RELEASE_FILES=window.SELECTED_RELEASE_FILES||[];
- const i=window.SELECTED_RELEASE_FILES.findIndex(f=>Number(f.id)===Number(id));
- if(i>=0)window.SELECTED_RELEASE_FILES.splice(i,1); else window.SELECTED_RELEASE_FILES.push({id:Number(id),name:String(name),type:String(type||'')});
- renderSelectedReleaseFiles();
- showReleaseFileStoragePicker();
-}
-function removeReleaseFile(id){
- window.SELECTED_RELEASE_FILES=(window.SELECTED_RELEASE_FILES||[]).filter(f=>Number(f.id)!==Number(id));
- renderSelectedReleaseFiles();
-}
+
+
+/* Shared form workflow guard:
+   - preserves the user's position after POST redirects,
+   - prevents accidental double submissions,
+   - keeps the existing visual design and server-side workflow intact. */
+(function(){
+  const KEY='ct4_return_position';
+  function savePosition(form){
+    if(!form || String(form.method||'get').toLowerCase()==='get') return;
+    try{
+      sessionStorage.setItem(KEY,JSON.stringify({
+        path:window.location.pathname+window.location.search,
+        y:Math.max(0,window.scrollY||0),
+        hash:window.location.hash||''
+      }));
+    }catch(_e){}
+  }
+  function restorePosition(){
+    try{
+      const raw=sessionStorage.getItem(KEY); if(!raw)return;
+      sessionStorage.removeItem(KEY);
+      const state=JSON.parse(raw);
+      if(!state || state.path!==window.location.pathname+window.location.search)return;
+      const y=Number(state.y)||0;
+      if(state.hash){
+        const target=document.querySelector(state.hash);
+        if(target) target.scrollIntoView({block:'start'});
+      }
+      window.setTimeout(()=>window.scrollTo({top:y,behavior:'auto'}),80);
+    }catch(_e){}
+  }
+  document.addEventListener('submit',function(e){
+    const form=e.target;
+    if(!(form instanceof HTMLFormElement))return;
+    if(form.dataset.ct4Handled==='1') return;
+    form.dataset.ct4Handled='1';
+    savePosition(form);
+    const submitters=[...form.querySelectorAll('button[type="submit"],input[type="submit"]')];
+    submitters.forEach(btn=>{
+      if(btn.disabled)return;
+      btn.dataset.ct4OriginalHtml=btn.innerHTML;
+      btn.disabled=true;
+      if(btn.tagName==='BUTTON'){
+        btn.innerHTML='<span class="material-symbols-outlined" aria-hidden="true">hourglass_top</span> Processing...';
+      }
+    });
+    /* Native navigation normally follows immediately; re-enable after a short
+       delay so validation/server-side interception can still recover. */
+    window.setTimeout(()=>{
+      submitters.forEach(btn=>{if(btn.dataset.ct4OriginalHtml){btn.disabled=false;btn.innerHTML=btn.dataset.ct4OriginalHtml;}});
+      form.dataset.ct4Handled='0';
+    },5000);
+  },true);
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',restorePosition);
+  else restorePosition();
+})();
+
+window.addEventListener('DOMContentLoaded',()=>{setTimeout(()=>{refreshFeedbackDataTable();},0);});

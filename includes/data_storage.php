@@ -4,6 +4,7 @@ require_once __DIR__.'/service_client.php';
 require_login();
 $storage=service('storage');
 $action=(string)($_POST['action'] ?? $_GET['action'] ?? 'list');
+if ($_SERVER['REQUEST_METHOD']==='POST') verify_csrf();
 
 if($action==='list'){
     header('Content-Type: application/json; charset=utf-8');
@@ -23,6 +24,7 @@ if($action==='download_all'){
         $name=(string)$file['file_name'];
         $base=$name; $i=1;
         while(isset($used[$name])){ $name=pathinfo($base,PATHINFO_FILENAME).'_'.$i.(pathinfo($base,PATHINFO_EXTENSION)?'.'.pathinfo($base,PATHINFO_EXTENSION):''); $i++; }
+        $name=ltrim(str_replace(['\\','/'], '_', $name), '.');
         $used[$name]=true;
         $zip->addFromString($name,(string)$file['file_data']);
     }
@@ -40,25 +42,12 @@ if($action==='view' || $action==='download'){
     if(!$file){ http_response_code(404); exit('File not found.'); }
     $name=$file['file_name'];
     $safeName=preg_replace('/[\r\n"\'\\\\]+/', '_', (string)$name);
-    $contentType = strtolower(trim((string)($file['file_type'] ?: 'application/octet-stream')));
-    // Stored files are user/branch supplied. Do not let uploaded HTML/SVG
-    // execute in the application's origin when "view" is requested.
-    $inlineTypes = [
-        'application/pdf',
-        'image/jpeg',
-        'image/png',
-        'image/gif',
-        'image/webp',
-        'text/plain',
-        'text/csv',
-    ];
-    $canInline = in_array($contentType, $inlineTypes, true);
-    $disposition = ($action === 'download' || !$canInline) ? 'attachment' : 'inline';
-    header('Content-Type: '.($contentType !== '' ? $contentType : 'application/octet-stream'));
+    header('Content-Type: '.($file['file_type']?:'application/octet-stream'));
     header('Content-Length: '.strlen((string)$file['file_data']));
     header('X-Content-Type-Options: nosniff');
-    header("Content-Security-Policy: default-src 'none'; sandbox");
-    header('Content-Disposition: '.$disposition.'; filename="'.$safeName.'"');
+    $mime=(string)($file['file_type']?:'application/octet-stream');
+    $inlineAllowed=in_array(strtolower($mime),['application/pdf','image/png','image/jpeg','image/gif','image/webp'],true);
+    header('Content-Disposition: '.($action==='download' || !$inlineAllowed ? 'attachment' : 'inline').'; filename="'.$safeName.'"');
     echo $file['file_data'];
     exit;
 }
